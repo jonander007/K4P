@@ -5,13 +5,19 @@
    Explore: view buttons in a left column, chart on the right sized to the
    viewport so no view needs scrolling.
    --------------------------------------------------------------------------- */
+/* The dark section fills exactly one screen: 1.5rem of padding above and
+   below the layout row, which takes the rest of the viewport height. */
+#vizSection > .ecl-container {
+  padding-top: 1.5rem !important;
+  padding-bottom: 1.5rem !important;
+}
+
 #vizLayout {
+  --viz-height: max(480px, calc(100vh - 3rem));
   display: flex;
   align-items: stretch;
   gap: 2rem;
-  height: calc(100vh - 4rem);
-  min-height: 480px;
-  padding-bottom: 1rem;
+  height: var(--viz-height);
 }
 
 /* Left column: section title and intro at the top, view buttons centred in
@@ -215,4 +221,15 @@
   border-top: 1px solid #e3e3ea;
   color: #0046ff;
   font-size: 0.875rem;
+}
+
+/* Side panel: anchored to the top of the chart and never taller than it, so
+   it stays inside the dark section (its content scrolls instead). */
+#vizLayout #sidePanel {
+  margin-top: 0 !important;
+  top: 0 !important;
+}
+
+#vizLayout #sidePanelInner {
+  max-height: var(--viz-height) !important;
 }
