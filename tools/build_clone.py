@@ -1,83 +1,102 @@
-"""Turn the saved K4P homepage (browser "Save page as") into a self-contained
-local clone under site/.
+"""Turn the saved K4P homepage (browser "Save page as": the .html plus its
+"Knowledge for policy_files" folder) into a self-contained local clone under site/.
 
-- ECL styles/scripts come from the open-source @ecl/preset-ec package (EUPL-1.2)
-  instead of the missing "Knowledge for policy_files" folder.
-- Analytics, cookie banner and webtools loaders are removed.
-- Photos that were not saved are replaced with neutral local placeholders.
+- All saved stylesheets and images are kept, copied to site/assets/k4p/ with
+  URL-safe names.
+- Only the ECL runtime and d3 are kept as scripts; Drupal behaviours,
+  analytics, cookie banner and webtools loaders are removed.
+- The Inter font (referenced by ECL as ../fonts/) comes from @ecl/preset-ec.
 
-Usage: python3 tools/build_clone.py <saved.html> <ecl-dist-dir> <d3.min.js>
+Usage: python3 tools/build_clone.py <saved.html> <saved_files_dir> <ecl-fonts-dir>
 """
 import re
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site"
 ASSETS = SITE / "assets"
+OUT = ASSETS / "k4p"
 PREFIX = "./Knowledge for policy_files/"
 
-src, ecl_dist, d3_js = (Path(p) for p in sys.argv[1:4])
+src, files_dir, fonts_dir = (Path(p) for p in sys.argv[1:4])
 html = src.read_text(encoding="utf-8")
 
+KEEP_JS = {"d3.min.js.descarga", "ecl-ec.js.descarga"}
+DROP_CSS = {"webtools.etrans.css"}  # only styles the removed translation widget
+
+
+def safe_name(name):
+    name = name.replace("#U00a9", "")  # "©" mangled by the browser/zip
+    if name.endswith(".js.descarga"):
+        name = name[: -len(".descarga")]
+    stem, dot, ext = name.rpartition(".")
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", stem).strip("-")
+    return f"{stem}.{ext}"
+
+
+def local_file(ref):
+    """Map a saved-page reference to the file on disk ("©" may be mangled)."""
+    name = unquote(ref)
+    path = files_dir / name
+    if not path.exists():
+        path = files_dir / name.replace("©", "#U00a9")
+    return path if path.exists() else None
+
+
 # --- vendor assets -----------------------------------------------------------
-for sub in ("styles", "scripts", "fonts"):
-    dest = ASSETS / "ecl" / sub
-    if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(ecl_dist / sub, dest, ignore=shutil.ignore_patterns("*.map", "optional"))
-(ASSETS / "img").mkdir(parents=True, exist_ok=True)
-shutil.copy(ecl_dist / "images/logo/positive/logo-ec--en.svg", ASSETS / "img/logo-ec--en.svg")
-shutil.copy(ecl_dist / "images/logo/negative/logo-ec--en.svg", ASSETS / "img/logo-ec--en-negative.svg")
-(ASSETS / "vendor").mkdir(parents=True, exist_ok=True)
-shutil.copy(d3_js, ASSETS / "vendor/d3.min.js")
+for stale in (ASSETS / "ecl", ASSETS / "img", ASSETS / "vendor", OUT, ASSETS / "fonts"):
+    if stale.exists():
+        shutil.rmtree(stale)
+OUT.mkdir(parents=True)
+shutil.copytree(fonts_dir, ASSETS / "fonts", ignore=shutil.ignore_patterns("*.txt"))
+missing = []
+
+
+def copy_ref(ref):
+    path = local_file(ref)
+    if path is None:
+        missing.append(ref)
+        return None
+    name = safe_name(path.name)
+    shutil.copy(path, OUT / name)
+    return f"assets/k4p/{name}"
+
 
 # --- stylesheets ---------------------------------------------------------------
-ECL_CSS = {
-    "ecl-ec.css": ("screen", "assets/ecl/styles/ecl-ec.css"),
-    "ecl-ec-print.css": ("print", "assets/ecl/styles/ecl-ec-print.css"),
-    "ecl-ec-color-modes.css": ("screen", "assets/ecl/styles/ecl-ec-color-modes.css"),
-}
-
-
 def replace_link(m):
     tag = m.group(0)
-    href = re.search(r'href="([^"]*)"', tag)
-    name = href.group(1).rsplit("/", 1)[-1] if href else ""
-    if name in ECL_CSS:
-        media, path = ECL_CSS[name]
-        return f'<link rel="stylesheet" media="{media}" href="{path}">'
-    if href and href.group(1).startswith(PREFIX):
-        return ""  # Drupal/K4P/webtools CSS that was not saved
-    return tag
+    href = re.search(r'href="(\./Knowledge for policy_files/[^"]*)"', tag)
+    if not href:
+        return tag
+    ref = href.group(1)[len(PREFIX):]
+    if ref in DROP_CSS:
+        return ""
+    new = copy_ref(ref)
+    return tag.replace(href.group(1), new) if new else ""
 
 
 html = re.sub(r"<link\b[^>]*>", replace_link, html)
-# Favicons point to the live site; use the local EC logo instead.
+# Favicons point to the live site; drop them so nothing is fetched from it.
 html = re.sub(r'<link rel="(?:icon|apple-touch-icon)"[^>]*>', "", html)
 html = html.replace(
-    "<title>",
-    '<link rel="stylesheet" href="assets/k4p-clone.css">\n    <title>',
+    "</head>",
+    '<link rel="stylesheet" href="assets/k4p-clone.css">\n</head>',
     1,
 )
 
+
 # --- scripts -------------------------------------------------------------------
-KEEP_JS = {
-    "d3.min.js.descarga": "assets/vendor/d3.min.js",
-    "ecl-ec.js.descarga": "assets/ecl/scripts/ecl-ec.js",
-}
-
-
 def replace_script(m):
     tag = m.group(0)
-    s = re.search(r'src="([^"]*)"', m.group(1))
+    s = re.search(r'src="\./Knowledge for policy_files/([^"]*)"', m.group(1))
     if not s:
-        return tag
-    name = s.group(1).rsplit("/", 1)[-1]
-    if name in KEEP_JS:
-        return f'<script src="{KEEP_JS[name]}"></script>'
-    return ""  # Drupal, jQuery plugins, analytics, webtools...
+        return tag if "src=" not in m.group(1) else ""
+    if s.group(1) not in KEEP_JS:
+        return ""  # Drupal, jQuery plugins, analytics, webtools...
+    return f'<script src="{copy_ref(s.group(1))}"></script>'
 
 
 html = re.sub(r"<script\b([^>]*)>\s*</script>", replace_script, html)
@@ -87,28 +106,11 @@ html = re.sub(r'<script type="application/json"[^>]*>.*?</script>', "", html, fl
 html = re.sub(r'<div id="cboxOverlay".*?(?=</body>)', "", html, flags=re.S)
 
 # --- images --------------------------------------------------------------------
-PLACEHOLDER = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
-<rect width="400" height="300" fill="#d9e1ef"/>
-<g fill="none" stroke="#7a8db3" stroke-width="8"><rect x="120" y="85" width="160" height="130" rx="8"/>
-<circle cx="170" cy="130" r="14"/><path d="M128 205l50-50 35 35 25-25 34 40"/></g>
-<text x="200" y="260" font-family="sans-serif" font-size="18" fill="#4a5a7a" text-anchor="middle">{label}</text>
-</svg>"""
-
-
-def replace_img_src(m):
-    name = m.group(1)
-    if name.startswith("logo-ec--en"):
-        return 'src="assets/img/logo-ec--en.svg"'
-    if name == "eu.svg":
-        return 'src="assets/img/logo-ec--en-negative.svg"'
-    slug = re.sub(r"[^a-z0-9]+", "-", name.rsplit(".", 1)[0].lower()).strip("-")
-    out = ASSETS / "img" / f"ph-{slug}.svg"
-    out.write_text(PLACEHOLDER.format(label=name[:40]), encoding="utf-8")
-    return f'src="assets/img/ph-{slug}.svg" data-original-src="{name}"'
-
-
-html = re.sub(r'src="\./Knowledge for policy_files/([^"]*)"', replace_img_src, html)
-html = re.sub(r'\s(?:srcset|data-srcset)="\./Knowledge for policy_files/[^"]*"', "", html)
+html = re.sub(
+    r'(src|srcset)="\./Knowledge for policy_files/([^"]*)"',
+    lambda m: f'{m.group(1)}="{copy_ref(m.group(2)) or ""}"',
+    html,
+)
 # <picture> sources use site-root paths that only resolve on the live server.
 html = re.sub(r'<source\b[^>]*srcset="/[^"]*"[^>]*>', "", html)
 
@@ -123,9 +125,8 @@ html = html.replace(
     1,
 )
 
-leftover = sorted(set(re.findall(r'Knowledge for policy_files/[^"\')]+', html)))
-SITE.mkdir(exist_ok=True)
 (SITE / "index.html").write_text(html, encoding="utf-8")
-print(f"wrote {SITE / 'index.html'} ({len(html)} bytes)")
-if leftover:
-    print("unresolved references:", *leftover, sep="\n  ")
+print(f"wrote {SITE / 'index.html'} ({len(html)} bytes), {len(list(OUT.iterdir()))} assets")
+leftover = sorted(set(re.findall(r'Knowledge for policy_files/[^"\')]+', html)))
+for ref in sorted(set(missing)) + leftover:
+    print("unresolved:", ref)

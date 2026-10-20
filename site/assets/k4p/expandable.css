@@ -1,0 +1,90 @@
+.ck section.expandable:before {
+  content: 'Expandable';
+  position: absolute;
+  left: 0;
+  top: 5px;
+  font-weight: bold;
+  display: block;
+  padding: 5px 10px 0;
+}
+
+.ck section.expandable {
+  border: dashed 2px #d81b60;
+  padding-top: 2rem;
+}
+
+.ck .ck.ck-editor__editable span[data-ck-unsafe-element="expanded"] {
+  display: initial !important;
+}
+
+.ck span[data-ck-unsafe-element="expanded"]:before {
+  content: 'Title (expanded by default)';
+  position: absolute;
+  left: 0px !important;
+  top: -10px;
+  display: inline-block;
+  padding: 5px;
+  color: #fff;
+  background: green;
+  line-height: 1;
+  font-size: 12px;
+}
+
+.ck .ck.ck-editor__editable span[data-ck-unsafe-element="expanded"] {
+  display: initial !important;
+}
+
+.ck expanded:before {
+  content: 'Title (expanded by default)';
+  position: absolute;
+  left: 0px !important;
+  top: -10px;
+  display: inline-block;
+  padding: 5px;
+  color: #fff;
+  background: green;
+  line-height: 1;
+  font-size: 12px;
+}
+
+.ck div.expandable-title:before {
+  content: 'Title (collapsed by default)';
+  position: absolute;
+  left: 0;
+  top: -10px;
+  display: inline-block;
+  padding: 5px;
+  color: #fff;
+  background: #1e88e5;
+  line-height: 1;
+  font-size: 12px;
+  left: -1px;
+}
+
+.ck div.expandable-title {
+  position: relative;
+  border: 1px dotted blue !important;
+  padding: 1em;
+  margin: 1em;
+}
+
+.ck div.expandable-content {
+  position: relative;
+  border: 1px dotted blue !important;
+  padding: 1em;
+  margin: 1em;
+}
+
+.ck div.expandable-content:before {
+  content: 'Content';
+  position: absolute;
+  left: 0;
+  top: -10px;
+  display: inline-block;
+  padding: 5px;
+  color: #fff;
+  background: #1e88e5;
+  line-height: 1;
+  font-size: 12px;
+  left: -1px;
+}

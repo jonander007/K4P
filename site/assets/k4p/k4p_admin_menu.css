@@ -1,0 +1,63 @@
+/* Content -> Feeds */
+.restricted-admin-menu a.toolbar-icon-views-viewviews-feeds-feed-page-1 {
+  display: none;
+}
+/* Content -> Files */
+.restricted-admin-menu a.toolbar-icon-admin-toolbar-tools-extra-linksview-files {
+  display: none;
+}
+
+
+/* Structure */
+.restricted-admin-menu a[data-drupal-link-system-path="admin/structure/block"] {
+  display: none;
+}
+.restricted-admin-menu a[data-drupal-link-system-path="admin/structure/menu"] {
+  display: none;
+}
+.restricted-admin-menu a[data-drupal-link-system-path="admin/structure/webtools_analytics_rule"] {
+  display: none;
+}
+/* Config -> Search and metadata -> Url Aliases */
+.restricted-admin-menu a.toolbar-icon-system-admin-config + ul a.toolbar-icon {
+  display: none;
+}
+.restricted-admin-menu a.toolbar-icon-system-admin-config + ul a.toolbar-icon-system-admin-config-search {
+  display: block;
+}
+.restricted-admin-menu a.toolbar-icon-system-admin-config + ul a.toolbar-icon-system-admin-config-search + a.toolbar-icon {
+  display: block;
+}
+.restricted-admin-menu a.toolbar-icon-system-admin-config + ul a.toolbar-icon-entity-path-alias-collection {
+  display: block;
+}
+
+.restricted-admin-menu a.toolbar-icon-system-admin-config + ul a.toolbar-icon-system-admin-config-system {
+  display: block;
+}
+
+.restricted-admin-menu a.toolbar-icon-system-admin-config + ul a.piwik-rules {
+  display: block;
+}
+
+.restricted-admin-menu a.toolbar-icon-system-admin-config + ul a.mega-menu {
+  display: block;
+}
+
+.restricted-admin-menu a.toolbar-icon-system-admin-config + ul .menu-item {
+  border-top: none !important;
+  border-bottom: none !important;
+}
+
+/* Reports -> Status report */
+.restricted-admin-menu a.toolbar-icon-system-status {
+  display: none;
+}
+/* Reports -> Top access denied errors */
+.restricted-admin-menu a.toolbar-icon-dblog-access-denied {
+  display: none;
+}
+/* Reports -> Views plugins */
+.restricted-admin-menu a.toolbar-icon-views-ui-reports-plugins {
+  display: none;
+}
