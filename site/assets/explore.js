@@ -1092,6 +1092,14 @@ function init(files) {
       // Final width of the (possibly truncated) label, for the background rect.
       tempText.text(label);
       const textWidth = tempNode.getComputedTextLength();
+      // Once the KC is expanded its dots move into the list below, so its row
+      // has room for the full name (drawn bold): kept for relayout().
+      tempText.text(fullLabel).style("font-weight", "bold");
+      d.fullLabel = fullLabel;
+      d.fullWidth = tempNode.getComputedTextLength();
+      d.label = label;
+      d.labelWidth = textWidth;
+      d.padX = padX;
       tempText.remove();
       group
         .append("rect")
@@ -1108,7 +1116,7 @@ function init(files) {
         .attr("y", 4)
         .style("font", `${fontSize}px ${FONT_FAMILY}`)
         .attr("fill", "#aaa")
-        .text(label)
+        .call(text => text.append("tspan").text(label))
         .style("cursor", "pointer")
         .on("mouseover", () => {
           if (vizState === "Network" && !pinnedHighlight) highlightKc(d.id);
@@ -1184,7 +1192,14 @@ function init(files) {
       kcLabelGroups
         .select("text")
         .attr("fill", d => (d.id === expandedKc ? "#fff" : "#aaa"))
-        .style("font-weight", d => (d.id === expandedKc ? "bold" : null));
+        .style("font-weight", d => (d.id === expandedKc ? "bold" : null))
+        .select("tspan")
+        .text(d => (d.id === expandedKc ? d.fullLabel : d.label));
+      kcLabelGroups
+        .select("rect")
+        .attr("width", d =>
+          (d.id === expandedKc ? d.fullWidth : d.labelWidth) + d.padX * 2,
+        );
       tr(linkTopKcSel).attr("d", topKcPath);
       linkKcPlcGroup.interrupt().style("opacity", animate ? 0 : 1);
       linkKcPlcSel.attr("d", kcPlcPath);
