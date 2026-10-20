@@ -606,6 +606,22 @@ function init(files) {
   const networkLayout = computeNetworkCoords(enrichedData, kcs, topics);
   const kcsData = formatKcsData(globalDistribution);
   const dataByTopicId = getDataByTopicId(plcsData, kcs);
+  // ¦¦ View boxes ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+  // chartContainer's origin sits at (svgWidth/2, svgHeight/2). "All" shows the
+  // whole #graph box around it, so the KC labels can use the full width rather
+  // than the square. "Topics" zooms onto the area the packed topic stars
+  // actually cover, so they fill the box instead of a corner of the square.
+  {
+    const cx = svgWidth / 2;
+    const cy = svgHeight / 2 + btnAreaHeight;
+    cfg.allVB = `${cx - containerWidth / 2} ${cy - containerHeight / 2} ${containerWidth} ${containerHeight}`;
+    const pad = svgHeight * 0.02;
+    const x0 = d3.min(dataByTopicId, d => d.x - d.topicOuterR) - pad;
+    const x1 = d3.max(dataByTopicId, d => d.x + d.topicOuterR) + pad;
+    const y0 = d3.min(dataByTopicId, d => d.y - d.topicOuterR) - pad;
+    const y1 = d3.max(dataByTopicId, d => d.y + d.topicOuterR) + pad;
+    cfg.topicsVB = `${cx + x0} ${cy + y0} ${x1 - x0} ${y1 - y0}`;
+  }
   // Stamp topicForceX/Y for the Topics › Network transition
   dataByTopicId.forEach(topic => {
     topic.plcs.forEach(ray =>
@@ -637,7 +653,7 @@ function init(files) {
     .select("#graph")
     .append("svg")
     .attr("aria-hidden", "true") // Remove this line when the graph is accessible
-    .attr("viewBox", `0 0 ${cfg.svgWidth} ${cfg.svgHeight + cfg.btnAreaHeight}`)
+    .attr("viewBox", cfg.allVB)
     .attr("preserveAspectRatio", "xMidYMid meet")
     .style("display", "block")
     .style("width", "100%")
@@ -1460,12 +1476,20 @@ function init(files) {
       allPlcsStarR +
       cfg.plcR * 1.8 * maxRayHeight +
       cfg.paddingR * (maxRayHeight + 2);
-    // Worst-case available width: distance from label origin to SVG edge at 90°
-    // (vertical direction is most restrictive since svgHeight == svgWidth here,
-    // but we take the minimum of both axes to be safe)
-    const halfW = cfg.svgWidth / 2;
-    const halfH = cfg.svgHeight / 2;
-    const maxAvailableWidth = Math.min(halfW, halfH) - labelStartR - 8; // 8px margin
+    // Available width per label: distance along its angle from the label
+    // origin to the edge of the visible box (the whole #graph box, see
+    // cfg.allVB), so labels pointing sideways can run longer than vertical ones.
+    const halfW = cfg.networkWidth / 2;
+    const halfH = cfg.networkHeight / 2;
+    function availableWidth(angle) {
+      const c = Math.abs(Math.cos(angle));
+      const s = Math.abs(Math.sin(angle));
+      const toEdge = Math.min(
+        c > 1e-6 ? halfW / c : Infinity,
+        s > 1e-6 ? halfH / s : Infinity,
+      );
+      return toEdge - labelStartR - 12; // 12px margin
+    }
     const kcItems = kcContainer
       .selectAll(".kcLabels")
       .data(kcsData)
@@ -1491,8 +1515,10 @@ function init(files) {
       .attr("text-anchor", d =>
         d.angle < Math.PI / 2 || d.angle > (3 * Math.PI) / 2 ? "start" : "end",
       )
-      .style("font", `${svgHeight * 0.015}px ${FONT_FAMILY}`)
-      .style("fill", d => kcColorScale(d.kcId))
+      // Larger than the original 1.5% and mixed 30% towards white, so the
+      // darker KC colours stay legible on the navy background
+      .style("font", `${Math.max(13, svgHeight * 0.019)}px ${FONT_FAMILY}`)
+      .style("fill", d => d3.interpolateRgb(kcColorScale(d.kcId), "#fff")(0.3))
       .style("opacity", 1)
       .style("cursor", "pointer")
       .text(d => d.kcLabel)
@@ -1502,7 +1528,8 @@ function init(files) {
         e.stopPropagation();
         openKcPopover(d, e, kcColorScale(d.kcId));
       })
-      .each(function () {
+      .each(function (d) {
+        const maxAvailableWidth = availableWidth(d.angle);
         // Truncate label if it exceeds the available radial space
         const el = d3.select(this);
         const node = this;
@@ -1876,11 +1903,12 @@ function init(files) {
     vizState = targetState;
     updateButtonStates();
     announceView(targetState);
-    // viewBox strings for the two canvas shapes. All/Topics use the square
-    // canvas; Network uses the full width and taller height. The x-origin of
-    // the Network box is shifted so chartContainer's centre (0) stays centred.
-    const squareVB = `0 0 ${cfg.svgWidth} ${cfg.svgHeight + cfg.btnAreaHeight}`;
+    // viewBox per view: All shows the whole box, Topics zooms onto the topic
+    // stars (see cfg.allVB / cfg.topicsVB) and Network uses the full width and
+    // height. The x-origin of the Network box is shifted so chartContainer's
+    // centre (0) stays centred.
     const networkVB = `${cfg.svgWidth / 2 - cfg.networkWidth / 2} 0 ${cfg.networkWidth} ${cfg.networkHeight + cfg.btnAreaHeight}`;
+    const viewBoxes = {All: cfg.allVB, Topics: cfg.topicsVB, Network: networkVB};
     // ¦¦ Network layer ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
     // Entering/leaving Network swaps the viewBox + chartContainer centre and
     // fades the network layer in/out; star elements stay put but stop catching
@@ -1914,7 +1942,7 @@ function init(files) {
         .transition()
         .duration(halfDuration)
         .delay(halfDuration)
-        .attr("viewBox", squareVB);
+        .attr("viewBox", viewBoxes[targetState]);
       chartContainer
         .transition()
         .duration(halfDuration)
@@ -1925,6 +1953,9 @@ function init(files) {
         );
       // Re-enable interaction with the star/topic elements outside Network.
       d3.selectAll(".topicContainer").style("pointer-events", "all");
+    } else {
+      // All <> Topics: zoom in step with the dots moving
+      svg.transition().duration(duration).attr("viewBox", viewBoxes[targetState]);
     }
     // ¦¦ All › Topics ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
     // Fade out KC labels, reveal topic rings/names, move each topic container to
@@ -2268,6 +2299,7 @@ function formatKcsData(globalDistribution) {
 // the draw/transition code knows which records to render.
 function getDataByTopicId(data, kcs) {
   const {plcR, paddingR, center} = cfg;
+  const boxAspect = cfg.networkWidth / cfg.networkHeight;
   const grouped = d3.group(data, d => d.topicId);
   const topicArray = Array.from(grouped, ([topicId, items]) => {
     const plcs = getPlcsDistribution(items, kcs, getThresholdTopic).raysArray;
@@ -2290,8 +2322,11 @@ function getDataByTopicId(data, kcs) {
       "collide",
       d3.forceCollide().radius(d => 2 + d.topicOuterR),
     )
-    .force("x", d3.forceX(0))
-    .force("y", d3.forceY(0))
+    // Pull harder vertically than horizontally in proportion to the #graph
+    // box, so the pack spreads into the same wide shape as the box and the
+    // Topics zoom (cfg.topicsVB) can make the stars larger.
+    .force("x", d3.forceX(0).strength(0.1 / boxAspect))
+    .force("y", d3.forceY(0).strength(0.1 * boxAspect))
     .stop()
     .tick(500);
   // Mark the first occurrence of each plcId as primary — once per topic
