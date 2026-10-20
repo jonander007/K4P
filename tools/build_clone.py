@@ -9,6 +9,7 @@
 
 Usage: python3 tools/build_clone.py <saved.html> <saved_files_dir> <ecl-fonts-dir>
 """
+import json
 import re
 import shutil
 import sys
@@ -113,6 +114,42 @@ html = re.sub(
 )
 # <picture> sources use site-root paths that only resolve on the live server.
 html = re.sub(r'<source\b[^>]*srcset="/[^"]*"[^>]*>', "", html)
+
+# --- "Explore" visualisation data ---------------------------------------------------
+# Browsers refuse fetch() on file:// pages, so the CSVs the chart loads from
+# the live site are embedded as strings in assets/viz-data.js instead. Any
+# CSV missing from data/viz/ still falls back to the live URL.
+LIVE_FILES = "https://knowledge-for-policy.ec.europa.eu/sites/default/files/"
+viz_dir = ROOT / "data" / "viz"
+viz_data = {p.name: p.read_text(encoding="utf-8-sig") for p in sorted(viz_dir.glob("*.csv"))}
+(ASSETS / "viz-data.js").write_text(
+    "window.K4P_VIZ_DATA = " + json.dumps(viz_data, ensure_ascii=False, indent=0) + ";\n",
+    encoding="utf-8",
+)
+html = re.sub(
+    r'd3\.csv\("' + re.escape(LIVE_FILES) + r'([^"]+)"\)',
+    r'k4pCsv("\1")',
+    html,
+)
+html = html.replace(
+    ".then(files => init(files))",
+    # The saved page already holds a static render of the chart; drop it so
+    # init() does not draw a second SVG below it.
+    '.then(files => { document.getElementById("graph").innerHTML = ""; init(files); })',
+    1,
+)
+html = html.replace(
+    '<script src="assets/k4p/d3.min.js"></script>',
+    '<script src="assets/k4p/d3.min.js"></script>'
+    '<script src="assets/viz-data.js"></script>'
+    "<script>function k4pCsv(name) {"
+    " var text = (window.K4P_VIZ_DATA || {})[name];"
+    " return text != null ? Promise.resolve(d3.csvParse(text))"
+    f' : d3.csv("{LIVE_FILES}" + name); }}</script>',
+    1,
+)
+if viz_data:
+    print("viz data:", ", ".join(viz_data))
 
 # --- page init + attribution -----------------------------------------------------
 html = html.replace(
