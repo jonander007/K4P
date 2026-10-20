@@ -152,6 +152,16 @@ html = html.replace(
 if viz_data:
     print("viz data:", ", ".join(viz_data))
 
+# The chart's inline script moves to assets/explore.js, which is where the
+# redesign of the "Explore" block is developed. It is only seeded from the
+# saved page when missing, so rebuilding never overwrites that work.
+viz_script = re.search(r"<script>(\s*/+\s*// DATA LOADING.*?)</script>", html, flags=re.S)
+explore_js = ASSETS / "explore.js"
+if not explore_js.exists():
+    explore_js.write_text(viz_script.group(1).strip() + "\n", encoding="utf-8")
+    print("seeded", explore_js)
+html = html.replace(viz_script.group(0), '<script src="assets/explore.js"></script>', 1)
+
 # --- page init + attribution -----------------------------------------------------
 html = html.replace(
     "</body>",
