@@ -246,8 +246,11 @@ function closeSidePanel(restoreFocus = true) {
     panelOpener = null;
   }
 }
-// Clicking empty graph space (not a PLC dot) clears any pinned network highlight
+// Clicking empty graph space (not a PLC dot) clears any pinned network
+// highlight. Network only: clearHighlight hides the per-topic duplicates,
+// which the Topics view needs visible.
 document.getElementById("graph").addEventListener("click", e => {
+  if (vizState !== "Network") return;
   if (e.target.tagName !== "circle") {
     if (networkSelsRef) networkSelsRef.clearHighlight();
   }
@@ -293,6 +296,127 @@ window.addEventListener("resize", () => {
   panel.style.width = `${width}px`;
   document.getElementById("sidePanelInner").style.width = `${width}px`;
   updateSidePanelHeaderLayout(width);
+});
+///////////////////////////////////////////////////////////////////////////////
+// LAYOUT
+///////////////////////////////////////////////////////////////////////////////
+// Put the view buttons in a column on the left and the chart on the right.
+// #vizLayout's height is capped to the viewport in CSS, so init() can size
+// every view to fit on screen. Runs once, before init() measures #graph.
+function setupVizLayout() {
+  if (document.getElementById("vizLayout")) return;
+  const buttons = document.getElementById("vizToggleButtons");
+  const wrapper = document.getElementById("vizWrapper");
+  const layout = document.createElement("div");
+  layout.id = "vizLayout";
+  wrapper.parentNode.insertBefore(layout, wrapper);
+  layout.append(buttons, wrapper);
+}
+///////////////////////////////////////////////////////////////////////////////
+// KC POPOVER ("All" view)
+///////////////////////////////////////////////////////////////////////////////
+// Clicking a KC name around the star opens a list of that KC's PLCs next to
+// the click; picking one opens the side panel. While it is open the KC stays
+// highlighted in the chart.
+let popoverKcId = null;
+// Dim every PLC and KC label outside kcId, or restore them all when null
+function highlightAllKc(kcId) {
+  d3.selectAll(".plcs").style("opacity", d => {
+    if (!d.isGlobalPrimary) return 0;
+    return kcId === null || d.kcId === kcId ? 1 : DIM_OPACITY;
+  });
+  d3.selectAll(".kcLabels").style("opacity", d =>
+    kcId === null || d.kcId === kcId ? 1 : DIM_OPACITY,
+  );
+}
+function closeKcPopover() {
+  const popover = document.getElementById("kcPopover");
+  if (popover) popover.remove();
+  if (popoverKcId === null) return;
+  popoverKcId = null;
+  if (vizState === "All") highlightAllKc(null);
+}
+function openKcPopover(kc, event, color) {
+  if (popoverKcId === kc.kcId) {
+    closeKcPopover();
+    return;
+  }
+  closeKcPopover();
+  popoverKcId = kc.kcId;
+  highlightAllKc(kc.kcId);
+  // The PLC records drawn in the "All" view for this KC (one per PLC)
+  const records = d3
+    .selectAll(".plcs")
+    .data()
+    .filter(d => d.isGlobalPrimary && d.kcId === kc.kcId);
+  // Built with textContent, not innerHTML: labels come from the CSVs
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text) node.textContent = text;
+    return node;
+  };
+  const popover = el("div", "kc-popover");
+  popover.id = "kcPopover";
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-label", kc.kcLabel);
+  popover.style.setProperty("--kc-color", color);
+  const header = el("div", "kc-popover__header");
+  const heading = el("div");
+  heading.append(
+    el("p", "kc-popover__eyebrow", `Knowledge community · ${records.length}`),
+    el("p", "kc-popover__title", kc.kcLabel),
+  );
+  const close = el("button", "kc-popover__close", "×");
+  close.type = "button";
+  close.setAttribute("aria-label", "Close");
+  close.addEventListener("click", closeKcPopover);
+  header.append(heading, close);
+  const list = el("ul", "kc-popover__list");
+  records.forEach(d => {
+    const item = el("li");
+    const button = el("button", "kc-popover__item");
+    button.type = "button";
+    button.append(el("span", "kc-popover__dot"));
+    const text = el("span");
+    text.append(el("span", "kc-popover__label", d.plcLabel));
+    if (d.plcIntroText) text.append(el("span", "kc-popover__intro", d.plcIntroText));
+    button.append(text);
+    button.addEventListener("click", e => {
+      e.stopPropagation();
+      closeKcPopover();
+      openSidePanel(d);
+    });
+    item.append(button);
+    list.append(item);
+  });
+  popover.append(header, list);
+  if (records[0] && records[0].kcLink) {
+    const link = el("a", "kc-popover__link", "Visit the knowledge community");
+    link.href = records[0].kcLink;
+    popover.append(link);
+  }
+  // Placed next to the click inside #vizWrapper, then nudged back in if it
+  // would overflow the wrapper's right or bottom edge.
+  const wrapper = document.getElementById("vizWrapper");
+  wrapper.append(popover);
+  const box = wrapper.getBoundingClientRect();
+  const gap = 12;
+  let left = event.clientX - box.left + gap;
+  let top = event.clientY - box.top + gap;
+  if (left + popover.offsetWidth > box.width - gap)
+    left = event.clientX - box.left - popover.offsetWidth - gap;
+  if (top + popover.offsetHeight > box.height - gap)
+    top = box.height - popover.offsetHeight - gap;
+  popover.style.left = `${Math.max(gap, left)}px`;
+  popover.style.top = `${Math.max(gap, top)}px`;
+  list.querySelector("button")?.focus({preventScroll: true});
+}
+document.addEventListener("click", e => {
+  if (!e.target.closest("#kcPopover")) closeKcPopover();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && document.getElementById("kcPopover")) closeKcPopover();
 });
 ///////////////////////////////////////////////////////////////////////////////
 // MODULE-LEVEL STATE
@@ -382,13 +506,20 @@ function init(files) {
     });
   }
   // ¦¦ Dimensions ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
-  // svgWidth/svgHeight stay square — they govern the centred All/Topics layouts.
-  // networkWidth captures the full div width so the Network layout can use it.
-  const containerWidth = document.getElementById("graph").clientWidth;
-  const svgWidth = Math.min(containerWidth, 1300);
+  // The chart fills the right-hand column of #vizLayout, whose height is capped
+  // to the viewport so every view fits on screen without scrolling.
+  // svgWidth/svgHeight stay square — the largest square that fits governs the
+  // centred All/Topics layouts — while Network uses the whole box.
+  setupVizLayout();
+  const graphEl = document.getElementById("graph");
+  const containerWidth = graphEl.clientWidth;
+  const containerHeight = graphEl.clientHeight;
+  const svgWidth = Math.min(containerWidth, containerHeight);
   const svgHeight = svgWidth;
-  const networkWidth = containerWidth; // full available width, no 1000 cap
-  const btnAreaHeight = 60;
+  const networkWidth = containerWidth;
+  // The view buttons now live in the left column, so no band is reserved for
+  // them above the chart.
+  const btnAreaHeight = 0;
   // ¦¦ Data ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
   // files are the 7 parsed CSVs in load order: topics, kcs, plcs, topic-kc,
   // kc-plc, plc-plc, plc›briefme. Each is normalized (BOM/whitespace stripped).
@@ -427,8 +558,7 @@ function init(files) {
       if (!plcBriefmeMap[r.plcId]) plcBriefmeMap[r.plcId] = [];
       plcBriefmeMap[r.plcId].push(r.plcBriefme);
     });
-  const minKcRowH = 22; // min px per KC row in network view
-  const networkHeight = Math.max(svgHeight, minKcRowH * kcs.length);
+  const networkHeight = containerHeight;
   // ¦¦ Shared config ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
   // cfg bundles dimensions, dot sizes (derived from svgHeight so they scale),
   // the chart centre and transition durations. Read by all layout/draw helpers.
@@ -444,6 +574,11 @@ function init(files) {
     paddingR: svgHeight * 0.008,
     paddingH: svgHeight * 0.008,
     center: {x: svgWidth / 2, y: svgHeight / 2 + btnAreaHeight},
+    // Network sizes: the canvas no longer scales up to 1300px wide, so text and
+    // KC nodes get absolute sizes instead of a fraction of svgWidth.
+    netFont: Math.max(11, Math.min(15, networkHeight * 0.017)),
+    kcR: Math.max(4, svgWidth * 0.006),
+    relayoutDuration: prefersReducedMotion() ? 1 : 500,
     // Every layout transition reads these, so reducing them here covers all
     // six prev›target branches in toggleViz at once
     duration: prefersReducedMotion() ? 1 : 1500,
@@ -496,7 +631,7 @@ function init(files) {
     .attr("preserveAspectRatio", "xMidYMid meet")
     .style("display", "block")
     .style("width", "100%")
-    .style("height", "auto")
+    .style("height", "100%")
     .style("user-select", "none");
   // chartContainer is translated to the chart centre, so all layouts use a
   // coordinate system where (0,0) is the middle of the canvas.
@@ -578,12 +713,9 @@ function init(files) {
       cfg.plcR * 3.5,
       plcAvailW / Math.max(1, maxPlcsInRow - 1),
     );
-    // Row Y positions: KCs and topics each spread evenly down their column.
+    // Row Y positions: topics spread evenly down their column; KC rows are
+    // placed by layout() below, since selecting a KC makes room under it.
     const kcYMap = {};
-    kcs.forEach((kc, i) => {
-      kcYMap[kc.kcId] =
-        -networkHeight / 2 + marginY + (availH * (i + 0.5)) / kcs.length;
-    });
     const topicYMap = {};
     topics.forEach((top, i) => {
       topicYMap[top.topicId] =
@@ -598,14 +730,42 @@ function init(files) {
       const m = plcIndexByKc[d.kcId];
       if (m && !m.has(d.plcId)) m.set(d.plcId, m.size);
     });
-    // Stamp positions onto enrichedData
-    enrichedData.forEach(d => {
-      const m = plcIndexByKc[d.kcId];
-      const idx = m ? (m.get(d.plcId) ?? 0) : 0;
-      d.networkX = plcStartX + idx * plcSpacing;
-      d.networkY = kcYMap[d.kcId] ?? 0;
-    });
-    return {topicX, kcX, plcStartX, kcYMap, topicYMap};
+    // A selected (expanded) KC lists its PLCs underneath it, one row each: the
+    // dot sits under the start of the KC label and its title follows it.
+    const plcRowX = kcX + cfg.kcR + 12 + cfg.plcR;
+    // Stamp KC row positions and PLC positions onto enrichedData for the given
+    // expanded KC (or none). Every row — KC or expanded PLC — gets the same
+    // height, so the column always fits the canvas without scrolling.
+    function layout(expandedKcId) {
+      const expanded = expandedKcId
+        ? [...(plcIndexByKc[expandedKcId] || new Map()).keys()]
+        : [];
+      const rowH = availH / (kcs.length + expanded.length);
+      const plcRowY = {};
+      let y = -networkHeight / 2 + marginY + rowH / 2;
+      kcs.forEach(kc => {
+        kcYMap[kc.kcId] = y;
+        y += rowH;
+        if (kc.kcId !== expandedKcId) return;
+        expanded.forEach(plcId => {
+          plcRowY[plcId] = y;
+          y += rowH;
+        });
+      });
+      enrichedData.forEach(d => {
+        if (d.kcId === expandedKcId) {
+          d.networkX = plcRowX;
+          d.networkY = plcRowY[d.plcId];
+          return;
+        }
+        const m = plcIndexByKc[d.kcId];
+        const idx = m ? (m.get(d.plcId) ?? 0) : 0;
+        d.networkX = plcStartX + idx * plcSpacing;
+        d.networkY = kcYMap[d.kcId] ?? 0;
+      });
+    }
+    layout(null);
+    return {topicX, kcX, plcStartX, plcRowX, kcYMap, topicYMap, layout};
   }
   ///////////////////////////////////////////////////////////////////////////////
   // DRAW NETWORK LAYER
@@ -624,13 +784,15 @@ function init(files) {
     kcs,
     topics,
   ) {
-    const {topicX, kcX, plcStartX, kcYMap, topicYMap} = networkLayout;
-    const {networkWidth, svgWidth, marginX} = cfg;
+    const {topicX, kcX, plcStartX, plcRowX, kcYMap, topicYMap, layout} =
+      networkLayout;
+    const {networkWidth, svgWidth, marginX, kcR, netFont} = cfg;
     const pieR = svgWidth * 0.018;
-    const kcR = svgWidth * 0.006;
     // Click "pins" a highlight; while pinned, hover is ignored. Stores a
     // re-applier fn for the pinned element, or null when nothing is pinned.
     let pinnedHighlight = null;
+    // KC whose PLCs are listed underneath it (one row each), or null
+    let expandedKc = null;
     const layer = chartContainer
       .append("g")
       .attr("id", "networkLayer")
@@ -667,28 +829,27 @@ function init(files) {
       plcNeighbors[r.plcSource].push(r.plcTarget);
       plcNeighbors[r.plcTarget].push(r.plcSource);
     });
-    // Unique position per plcId (first occurrence)
+    // Unique position per plcId (first occurrence). Refreshed in place by
+    // relayout(), so everything below reads positions through this map.
     const plcPosMap = {};
-    enrichedData.forEach(d => {
-      if (!plcPosMap[d.plcId])
-        plcPosMap[d.plcId] = {x: d.networkX, y: d.networkY};
-    });
+    function refreshPlcPos() {
+      Object.keys(plcPosMap).forEach(id => delete plcPosMap[id]);
+      enrichedData.forEach(d => {
+        if (!plcPosMap[d.plcId])
+          plcPosMap[d.plcId] = {x: d.networkX, y: d.networkY};
+      });
+    }
+    refreshPlcPos();
     // ¦¦ Gradients for PLC-PLC arcs ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
     // Each arc fades from its source PLC colour to its target PLC colour, so one
     // linear gradient is created per link and referenced by id.
     const plcLinkData = plcPlcRows
       .map((r, i) => {
-        const sa = plcPosMap[r.plcSource];
-        const sb = plcPosMap[r.plcTarget];
-        if (!sa || !sb) return null;
+        if (!plcPosMap[r.plcSource] || !plcPosMap[r.plcTarget]) return null;
         const grad = defs
           .append("linearGradient")
           .attr("id", `net-plc-grad-${i}`)
-          .attr("gradientUnits", "userSpaceOnUse")
-          .attr("x1", sa.x)
-          .attr("y1", sa.y)
-          .attr("x2", sb.x)
-          .attr("y2", sb.y);
+          .attr("gradientUnits", "userSpaceOnUse");
         grad
           .append("stop")
           .attr("offset", "0%")
@@ -698,14 +859,65 @@ function init(files) {
           .attr("offset", "100%")
           .attr("stop-color", plcColorMap[r.plcTarget] || "#fff");
         return {
-          sa,
-          sb,
+          grad,
           idA: r.plcSource,
           idB: r.plcTarget,
           gradId: `net-plc-grad-${i}`,
         };
       })
       .filter(Boolean);
+    function placeGradients() {
+      plcLinkData.forEach(d => {
+        const sa = plcPosMap[d.idA];
+        const sb = plcPosMap[d.idB];
+        d.grad
+          .attr("x1", sa.x)
+          .attr("y1", sa.y)
+          .attr("x2", sb.x)
+          .attr("y2", sb.y);
+      });
+    }
+    placeGradients();
+    // ¦¦ Link paths ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+    // Computed from the current kcYMap / plcPosMap, so a relayout only has to
+    // re-run them.
+    // Cubic bézier from the topic column to the KC column. Links run edge to
+    // edge, not centre to centre: when a highlight fades the nodes out, links
+    // drawn to the centre show through and read as crossing the nodes instead
+    // of connecting them.
+    function topKcPath(d) {
+      const sx = topicX + pieR;
+      const sy = topicYMap[d.topId];
+      const tx = kcX - kcR;
+      const ty = kcYMap[d.kcId];
+      const mx = (sx + tx) / 2;
+      return `M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx},${ty}`;
+    }
+    // Bézier from the KC to its PLC's slot in the PLC column; for the expanded
+    // KC, a tree branch dropping from the KC node to each listed PLC instead.
+    function kcPlcPath(d) {
+      const pos = plcPosMap[d.plcId];
+      const ky = kcYMap[d.kcId];
+      if (d.kcId === expandedKc) {
+        const r = Math.min(6, Math.abs(pos.y - ky) / 2);
+        return `M${kcX},${ky + kcR} V${pos.y - r} Q${kcX},${pos.y} ${kcX + r},${pos.y} H${pos.x - cfg.plcR}`;
+      }
+      const sx = kcX + kcR;
+      const tx = pos.x - cfg.plcR;
+      const mx = (sx + tx) / 2;
+      return `M${sx},${ky} C${mx},${ky} ${mx},${pos.y} ${tx},${pos.y}`;
+    }
+    // Same-row pairs get a shallow quadratic bow, others a wider arc.
+    function plcArcPath(d) {
+      const {x: x1, y: y1} = plcPosMap[d.idA],
+        {x: x2, y: y2} = plcPosMap[d.idB];
+      if (Math.abs(y1 - y2) < 2) {
+        const mx = (x1 + x2) / 2;
+        return `M${x1},${y1} Q${mx},${y1 + 15} ${x2},${y2}`;
+      }
+      const cx = Math.max(x1, x2) + 40;
+      return `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`;
+    }
     // ¦¦ Links topic › KC ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
     // Cubic bézier from the topic column to the KC column, coloured by KC.
     // Links run edge to edge, not centre to centre: when a highlight fades the
@@ -717,10 +929,6 @@ function init(files) {
       if (kcYMap[r.kcId] === undefined) return;
       if (!kcsWithPlc.has(r.kcId)) return;
       linkTopKcData.push({
-        sx: topicX + pieR,
-        sy: topicYMap[r.topicId],
-        tx: kcX - kcR,
-        ty: kcYMap[r.kcId],
         color: kcColorScale(r.kcId),
         topId: r.topicId,
         kcId: r.kcId,
@@ -731,10 +939,7 @@ function init(files) {
       .selectAll("path")
       .data(linkTopKcData)
       .join("path")
-      .attr("d", d => {
-        const mx = (d.sx + d.tx) / 2;
-        return `M${d.sx},${d.sy} C${mx},${d.sy} ${mx},${d.ty} ${d.tx},${d.ty}`;
-      })
+      .attr("d", topKcPath)
       .attr("stroke", d => d.color)
       .attr("stroke-width", 2)
       .attr("stroke-opacity", 0.35)
@@ -743,28 +948,20 @@ function init(files) {
     // Cubic bézier from the KC column to each PLC's slot in the PLC column.
     const linkKcPlcData = kcPlc
       .map(r => {
-        const pos = plcPosMap[r.plcId];
-        if (!pos || kcYMap[r.kcId] === undefined) return null;
+        if (!plcPosMap[r.plcId] || kcYMap[r.kcId] === undefined) return null;
         return {
-          sx: kcX + kcR,
-          sy: kcYMap[r.kcId],
-          tx: pos.x - cfg.plcR,
-          ty: pos.y,
           color: kcColorScale(r.kcId),
           kcId: r.kcId,
           plcId: r.plcId,
         };
       })
       .filter(Boolean);
-    const linkKcPlcSel = layer
-      .append("g")
+    const linkKcPlcGroup = layer.append("g");
+    const linkKcPlcSel = linkKcPlcGroup
       .selectAll("path")
       .data(linkKcPlcData)
       .join("path")
-      .attr("d", d => {
-        const mx = (d.sx + d.tx) / 2;
-        return `M${d.sx},${d.sy} C${mx},${d.sy} ${mx},${d.ty} ${d.tx},${d.ty}`;
-      })
+      .attr("d", kcPlcPath)
       .attr("stroke", d => d.color)
       .attr("stroke-width", 1.5)
       .attr("stroke-opacity", 0.25)
@@ -777,16 +974,7 @@ function init(files) {
       .selectAll("path")
       .data(plcLinkData)
       .join("path")
-      .attr("d", d => {
-        const {x: x1, y: y1} = d.sa,
-          {x: x2, y: y2} = d.sb;
-        if (Math.abs(y1 - y2) < 2) {
-          const mx = (x1 + x2) / 2;
-          return `M${x1},${y1} Q${mx},${y1 + 15} ${x2},${y2}`;
-        }
-        const cx = Math.max(x1, x2) + 40;
-        return `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`;
-      })
+      .attr("d", plcArcPath)
       .attr("stroke", d => `url(#${d.gradId})`)
       .attr("stroke-width", 1.8)
       .attr("stroke-opacity", 0)
@@ -799,16 +987,29 @@ function init(files) {
         id: k.kcId,
         short: k.kcLabel,
         x: kcX,
-        y: kcYMap[k.kcId],
         color: kcColorScale(k.kcId),
       }));
+    // Clicking a KC selects it: its PLCs unfold underneath, one row each, and
+    // the highlight is pinned. Clicking it again folds it back.
+    function selectKc(e, d) {
+      if (vizState !== "Network") return;
+      e.stopPropagation();
+      if (expandedKc === d.id) {
+        clearHighlight();
+        return;
+      }
+      expandedKc = d.id;
+      relayout(true);
+      pinnedHighlight = () => highlightKc(d.id);
+      highlightKc(d.id);
+    }
     const kcCircles = layer
       .append("g")
       .selectAll("circle")
       .data(kcNodeData)
       .join("circle")
       .attr("cx", d => d.x)
-      .attr("cy", d => d.y)
+      .attr("cy", d => kcYMap[d.id])
       .attr("r", kcR)
       .attr("fill", d => d.color)
       .attr("fill-opacity", 0.9)
@@ -820,16 +1021,21 @@ function init(files) {
       .on("mouseleave", () => {
         if (vizState === "Network") resetHighlight();
       })
-      .on("click", (e, d) => {
-        if (vizState !== "Network") return;
-        e.stopPropagation();
-        pinnedHighlight = () => highlightKc(d.id);
-        highlightKc(d.id);
-      });
+      .on("click", selectKc);
     // KC labels: a background rect + text placed to the right of each KC node,
-    // truncated to fit the gap before the PLC column, with the full name as a tooltip.
-    kcNodeData.forEach(d => {
-      const fontSize = svgWidth * 0.013;
+    // truncated to fit the gap before the PLC column, with the full name as a
+    // tooltip. Each label is a group positioned at its row, so a relayout only
+    // moves the group.
+    const kcLabelGroups = layer
+      .append("g")
+      .selectAll("g")
+      .data(kcNodeData)
+      .join("g")
+      .attr("class", "kcNetLabel")
+      .attr("transform", d => `translate(0,${kcYMap[d.id]})`);
+    kcLabelGroups.each(function (d) {
+      const group = d3.select(this);
+      const fontSize = netFont;
       const padX = 4;
       const padY = 2;
       const labelX = d.x + kcR + 12;
@@ -861,19 +1067,19 @@ function init(files) {
       tempText.text(label);
       const textWidth = tempNode.getComputedTextLength();
       tempText.remove();
-      layer
+      group
         .append("rect")
         .attr("x", labelX - padX)
-        .attr("y", d.y + 4 - fontSize * 0.75 - padY)
+        .attr("y", 4 - fontSize * 0.75 - padY)
         .attr("width", textWidth + padX * 2)
         .attr("height", fontSize + padY * 2)
         .attr("rx", 2)
         .attr("fill", backgroundColor)
         .attr("fill-opacity", 0.75);
-      layer
+      group
         .append("text")
         .attr("x", labelX)
-        .attr("y", d.y + 4)
+        .attr("y", 4)
         .style("font", `${fontSize}px ${FONT_FAMILY}`)
         .attr("fill", "#aaa")
         .text(label)
@@ -884,15 +1090,104 @@ function init(files) {
         .on("mouseleave", () => {
           if (vizState === "Network") resetHighlight();
         })
-        .on("click", e => {
-          if (vizState !== "Network") return;
-          e.stopPropagation();
-          pinnedHighlight = () => highlightKc(d.id);
-          highlightKc(d.id);
-        })
+        .on("click", e => selectKc(e, d))
         .append("title")
         .text(fullLabel);
     });
+    // ¦¦ Expanded PLC rows ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+    // One title per PLC, shown next to its dot only while its KC is expanded.
+    // Clicking the title opens the side panel, like clicking the dot.
+    const plcRowRecords = enrichedData.filter(d => d.isGlobalPrimary);
+    const plcTitleX = plcRowX + cfg.plcR + 10;
+    const plcTitleMaxW =
+      networkWidth / 2 - marginX - networkWidth * 0.02 - plcTitleX;
+    const plcRowLabels = layer
+      .append("g")
+      .selectAll("text")
+      .data(plcRowRecords)
+      .join("text")
+      .attr("class", "plcRowLabel")
+      .attr("x", plcTitleX)
+      .attr("y", d => plcPosMap[d.plcId].y + 4)
+      .style("font", `${netFont}px ${FONT_FAMILY}`)
+      .attr("fill", "#e6e6f0")
+      .style("cursor", "pointer")
+      .style("opacity", 0)
+      .style("pointer-events", "none")
+      .text(d => d.plcLabel)
+      .on("mouseover", function () {
+        d3.select(this).attr("fill", "#fff").style("text-decoration", "underline");
+      })
+      .on("mouseleave", function () {
+        d3.select(this).attr("fill", "#e6e6f0").style("text-decoration", null);
+      })
+      .on("click", (e, d) => {
+        e.stopPropagation();
+        openSidePanel(d);
+      })
+      .each(function (d) {
+        const el = d3.select(this);
+        const node = this;
+        const full = d.plcLabel;
+        if (node.getComputedTextLength() > plcTitleMaxW) {
+          let lo = 0,
+            hi = full.length;
+          while (lo < hi - 1) {
+            const mid = Math.floor((lo + hi) / 2);
+            el.text(full.slice(0, mid) + "…");
+            if (node.getComputedTextLength() <= plcTitleMaxW) lo = mid;
+            else hi = mid;
+          }
+          el.text(full.slice(0, lo) + "…");
+        }
+        el.append("title").text(full);
+      });
+    // ¦¦ Relayout ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+    // Re-place every row for the current expandedKc. KC nodes, labels, topic
+    // links and dots slide to their new rows; the KC›PLC links change shape
+    // (bézier vs tree branch), which cannot be tweened, so that group fades
+    // out and back in around the move. moveDots is false when leaving the
+    // Network view, whose own transition is about to move the dots.
+    function relayout(animate, moveDots = true) {
+      layout(expandedKc);
+      refreshPlcPos();
+      const duration = animate ? cfg.relayoutDuration : 0;
+      const tr = sel => sel.transition().duration(duration);
+      tr(kcCircles).attr("cy", d => kcYMap[d.id]);
+      tr(kcLabelGroups).attr("transform", d => `translate(0,${kcYMap[d.id]})`);
+      kcLabelGroups
+        .select("text")
+        .attr("fill", d => (d.id === expandedKc ? "#fff" : "#aaa"))
+        .style("font-weight", d => (d.id === expandedKc ? "bold" : null));
+      tr(linkTopKcSel).attr("d", topKcPath);
+      linkKcPlcGroup.interrupt().style("opacity", animate ? 0 : 1);
+      linkKcPlcSel.attr("d", kcPlcPath);
+      if (animate)
+        linkKcPlcGroup.transition().delay(duration).duration(250).style("opacity", 1);
+      placeGradients();
+      plcArcSel.attr("d", plcArcPath);
+      plcRowLabels
+        .attr("y", d => plcPosMap[d.plcId].y + 4)
+        .style("pointer-events", d => (d.kcId === expandedKc ? "all" : "none"))
+        .interrupt()
+        .style("opacity", 0)
+        .filter(d => d.kcId === expandedKc)
+        .transition()
+        .delay(duration)
+        .duration(250)
+        .style("opacity", 1);
+      if (moveDots)
+        tr(d3.selectAll(".plcs")).attr(
+          "transform",
+          d => `translate(${d.networkX},${d.networkY})`,
+        );
+    }
+    // Fold any expanded KC back into its row (no-op when none is expanded)
+    function collapse(animate, moveDots = true) {
+      if (expandedKc === null) return;
+      expandedKc = null;
+      relayout(animate, moveDots);
+    }
     // ¦¦ Topic pie charts ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
     // Each topic node is a donut whose slices are its KCs (colour-coded); the
     // matching label sits to its left. Hover/click highlights the topic's row.
@@ -919,6 +1214,7 @@ function init(files) {
         .on("click", e => {
           if (vizState !== "Network") return;
           e.stopPropagation();
+          collapse(true);
           pinnedHighlight = () => highlightTopic(top.topicId);
           highlightTopic(top.topicId);
         });
@@ -958,7 +1254,7 @@ function init(files) {
         .attr("x", labelOriginX)
         .attr("y", y + 4)
         .attr("text-anchor", "end")
-        .style("font", `${svgWidth * 0.013}px ${FONT_FAMILY}`)
+        .style("font", `${netFont}px ${FONT_FAMILY}`)
         .attr("fill", "#aaa")
         .text(top.topicLabel)
         .style("cursor", "pointer")
@@ -972,6 +1268,7 @@ function init(files) {
         .on("click", e => {
           if (vizState !== "Network") return;
           e.stopPropagation();
+          collapse(true);
           pinnedHighlight = () => highlightTopic(top.topicId);
           highlightTopic(top.topicId);
         })
@@ -1106,9 +1403,12 @@ function init(files) {
         .style("opacity", 0);
       topPieGroups.forEach(g => g.attr("opacity", 1));
     }
-    // Force-clear regardless of pin (used when unpinning).
-    function clearHighlight() {
+    // Force-clear regardless of pin (used when unpinning), folding any
+    // expanded KC too. Leaving the Network view passes moveDots = false: the
+    // view transition is about to animate the dots itself.
+    function clearHighlight(moveDots = true) {
       pinnedHighlight = null;
+      collapse(moveDots, moveDots);
       linkTopKcSel.attr("stroke-opacity", 0.35).attr("stroke-width", 2);
       linkKcPlcSel.attr("stroke-opacity", 0.25).attr("stroke-width", 1.5);
       plcArcSel.attr("stroke-opacity", 0);
@@ -1184,7 +1484,14 @@ function init(files) {
       .style("font", `${svgHeight * 0.015}px ${FONT_FAMILY}`)
       .style("fill", d => kcColorScale(d.kcId))
       .style("opacity", 1)
+      .style("cursor", "pointer")
       .text(d => d.kcLabel)
+      // Clicking a KC name lists its PLCs in a popover to pick one from
+      .on("click", (e, d) => {
+        if (vizState !== "All") return;
+        e.stopPropagation();
+        openKcPopover(d, e, kcColorScale(d.kcId));
+      })
       .each(function () {
         // Truncate label if it exceeds the available radial space
         const el = d3.select(this);
@@ -1299,10 +1606,7 @@ function init(files) {
         if (vizState === "Network") {
           networkSels.resetHighlight();
         } else if (vizState === "All") {
-          d3.selectAll(".plcs").style("opacity", pd =>
-            pd.isGlobalPrimary ? 1 : 0,
-          );
-          d3.selectAll(".kcLabels").style("opacity", 1);
+          highlightAllKc(popoverKcId);
         } else if (vizState === "Topics") {
           d3.selectAll(".plcs").style("opacity", pd =>
             pd.isTopicPrimary ? 1 : 0,
@@ -1344,27 +1648,12 @@ function init(files) {
   // Active/inactive state is expressed by swapping the ECL button variant,
   // so the pressed state needs no custom CSS
   function buttonClasses(isActive) {
-    return isActive
-      ? "ecl-button ecl-button--secondary ecl-button--inverted ecl-button--icon-only"
-      : "ecl-button ecl-button--tertiary ecl-button--inverted ecl-button--icon-only";
+    return isActive ? "viz-view-btn viz-view-btn--active" : "viz-view-btn";
   }
   // Build the three view-switch buttons (All / Topics / Network) into the
   // #vizToggleButtons container, each wired to call toggleViz on click.
   function drawToggleButton() {
     d3.select("#vizToggleButtons").selectAll("*").remove();
-    // Captions above the buttons (HTML, not SVG, so they never get clipped).
-    d3.select("#vizToggleButtons")
-      .append("p")
-      .attr("class", "ecl-u-type-m ecl-u-mb-none")
-      .style("color", "#8b8daa")
-      .text(
-        "Each dot represents a piece of policy-relevant content. Hover over a dot and click to find out more about it.",
-      );
-    d3.select("#vizToggleButtons")
-      .append("p")
-      .attr("class", "ecl-u-type-m ecl-u-mt-none ecl-u-mb-s")
-      .style("color", "#8b8daa")
-      .text("Toggle between views to explore the data.");
     // Icon geometry: each button holds its own square SVG, so the icon
     // coordinates below are relative to that button, not to a shared canvas.
     // ECL adds its own padding around the icon to keep the button square.
@@ -1373,19 +1662,19 @@ function init(files) {
     // icons keep the same proportions at any size.
     const strokeThick = iconSize * 0.03; // 1.5px at iconSize 50
     const strokeThin = iconSize * 0.02; // 1px at iconSize 50
+    // The buttons form the left column of #vizLayout, stacked and centred
+    // vertically, each showing its view's name under the icon.
     const btnGroup = d3
       .select("#vizToggleButtons")
       .append("div")
-      .attr("class", "ecl-u-d-flex ecl-u-mv-2xs")
-      .attr("style", "gap: 0.5rem")
+      .attr("class", "viz-view-buttons")
       .attr("role", "group")
       .attr("aria-label", "Visualisation view");
-    // Buttons use the ECL icon-only pattern (same markup as #closePanel): a real
-    // <button>, reachable by keyboard and operable with Enter/Space, whose
-    // accessible name comes from the visually hidden ecl-button__label. The
-    // inline SVG replaces the usual ECL sprite icon. Returns that SVG so each
-    // caller can draw its own icon into it.
-    function makeButton(id, state, label) {
+    // A real <button>, reachable by keyboard and operable with Enter/Space,
+    // whose accessible name is the visible view name; the longer description
+    // stays available as a tooltip. Returns the icon SVG so each caller can
+    // draw its own icon into it.
+    function makeButton(id, state, name, description) {
       const isActive = vizState === state;
       const btn = btnGroup
         .append("button")
@@ -1393,35 +1682,34 @@ function init(files) {
         .attr("type", "button")
         .attr("class", buttonClasses(isActive))
         .attr("aria-pressed", isActive ? "true" : "false")
-        .attr("title", label)
+        .attr("title", description)
         .on("click", () => {
           if (vizState !== state) toggleViz(state);
         });
-      const container = btn
-        .append("span")
-        .attr("class", "ecl-button__container");
-      container
-        .append("span")
-        .attr("class", "ecl-button__label")
-        .attr("data-ecl-label", "true")
-        .text(label);
-      // viewBox makes the drawing scale instead of being clipped. Width/height
-      // go in inline styles because ECL's .ecl-button__icon rules would
-      // otherwise override the plain attributes.
-      return container
+      // viewBox makes the drawing scale instead of being clipped
+      const icon = btn
         .append("svg")
-        .attr("class", "ecl-button__icon")
+        .attr("class", "viz-view-btn__icon")
         .attr("viewBox", `0 0 ${iconSize} ${iconSize}`)
         .attr("aria-hidden", "true")
-        .attr("focusable", "false")
-        .attr("data-ecl-icon", "")
-        .style("width", `${iconSize}px`)
-        .style("height", `${iconSize}px`);
+        .attr("focusable", "false");
+      btn.append("span").attr("class", "viz-view-btn__label").text(name);
+      return icon;
+    }
+    // Help text under the buttons (HTML, not SVG, so it never gets clipped).
+    function addHelp() {
+      d3.select("#vizToggleButtons")
+        .append("p")
+        .attr("class", "viz-help")
+        .text(
+          "Each dot represents a piece of policy-relevant content. Hover over a dot and click to find out more about it.",
+        );
     }
     // Button 1 — All: single ring
     const btnAll = makeButton(
       "btnAll",
       "All",
+      "All content",
       "View all policy-relevant content together by Knowledge Community",
     );
     btnAll
@@ -1436,6 +1724,7 @@ function init(files) {
     const btnTopics = makeButton(
       "btnTopics",
       "Topics",
+      "By topic",
       "View policy-relevant content grouped by JRC Topic",
     );
     [
@@ -1461,6 +1750,7 @@ function init(files) {
     // Button 3 — Network: 3 columns of dots with lines
     const btnNetwork = makeButton(
       "btnNetwork",
+      "Network",
       "Network",
       "View data as a three-layer network",
     );
@@ -1520,6 +1810,7 @@ function init(files) {
         .style("stroke", "currentColor")
         .style("stroke-width", strokeThin);
     });
+    addHelp();
   }
   ///////////////////////////////////////////////////////////////////////////////
   // ANNOUNCE VIEW
@@ -1567,7 +1858,11 @@ function init(files) {
     // closes on every view switch. Focus is not restored to that dot: it
     // belongs on the toggle button that was just activated.
     if (isPanelOpen()) closeSidePanel(false);
+    closeKcPopover();
     const prevState = vizState;
+    // A selected KC unfolds its PLCs into the Network layout only; fold it
+    // back before the dots leave, so they start from their usual rows.
+    if (prevState === "Network") networkSels.clearHighlight(false);
     vizState = targetState;
     updateButtonStates();
     announceView(targetState);

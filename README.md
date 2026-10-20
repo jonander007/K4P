@@ -7,6 +7,7 @@ para trabajar propuestas de cambio.
 
 - `site/index.html` – el clon. Ábrelo directamente en el navegador.
 - `site/assets/k4p-clone.css` – se carga después de los estilos originales; aquí van las propuestas de estilo.
+- `site/assets/explore.js` – script del gráfico "Explore", con el rediseño (vistas en columna, listas por comunidad).
 - `site/assets/k4p/` – CSS, imágenes, ECL 5.0.1 y d3 tal como los sirve la web original.
 - `site/assets/fonts/` – fuente Inter (de `@ecl/preset-ec`, EUPL-1.2), que el CSS de ECL busca en `../fonts`.
 - `original/home_en.saved.html` – la página tal cual se guardó desde el navegador.
