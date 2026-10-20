@@ -9,13 +9,26 @@
   display: flex;
   align-items: stretch;
   gap: 2rem;
-  height: calc(100vh - 9rem);
+  height: calc(100vh - 4rem);
   min-height: 480px;
-  margin-top: 1.5rem;
+  padding-bottom: 1rem;
+}
+
+/* Left column: section title and intro at the top, view buttons centred in
+   the remaining height. */
+#vizSide {
+  flex: 0 0 15rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#vizIntro p {
+  margin-bottom: 0;
 }
 
 #vizToggleButtons {
-  flex: 0 0 11rem;
+  flex: 1;
   display: flex !important;
   flex-direction: column;
   justify-content: center;

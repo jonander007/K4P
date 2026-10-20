@@ -300,17 +300,27 @@ window.addEventListener("resize", () => {
 ///////////////////////////////////////////////////////////////////////////////
 // LAYOUT
 ///////////////////////////////////////////////////////////////////////////////
-// Put the view buttons in a column on the left and the chart on the right.
+// Put the section title, intro and view buttons in a column on the left and
+// the chart on the right, so the chart gets the full height of the section.
 // #vizLayout's height is capped to the viewport in CSS, so init() can size
 // every view to fit on screen. Runs once, before init() measures #graph.
 function setupVizLayout() {
   if (document.getElementById("vizLayout")) return;
   const buttons = document.getElementById("vizToggleButtons");
   const wrapper = document.getElementById("vizWrapper");
+  const container = wrapper.parentNode;
+  const intro = document.createElement("div");
+  intro.id = "vizIntro";
+  intro.append(
+    ...container.querySelectorAll(":scope > h2, :scope > p"),
+  );
+  const side = document.createElement("div");
+  side.id = "vizSide";
+  side.append(intro, buttons);
   const layout = document.createElement("div");
   layout.id = "vizLayout";
-  wrapper.parentNode.insertBefore(layout, wrapper);
-  layout.append(buttons, wrapper);
+  container.insertBefore(layout, wrapper);
+  layout.append(side, wrapper);
 }
 ///////////////////////////////////////////////////////////////////////////////
 // KC POPOVER ("All" view)
