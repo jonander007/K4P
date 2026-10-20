@@ -118,7 +118,8 @@ html = re.sub(r'<source\b[^>]*srcset="/[^"]*"[^>]*>', "", html)
 # --- "Explore" visualisation data ---------------------------------------------------
 # Browsers refuse fetch() on file:// pages, so the CSVs the chart loads from
 # the live site are embedded as strings in assets/viz-data.js instead. Any
-# CSV missing from data/viz/ still falls back to the live URL.
+# CSV missing from data/viz/ falls back to the live URL, and to no rows if that
+# fails too, so one missing file does not take the whole chart down.
 LIVE_FILES = "https://knowledge-for-policy.ec.europa.eu/sites/default/files/"
 viz_dir = ROOT / "data" / "viz"
 viz_data = {p.name: p.read_text(encoding="utf-8-sig") for p in sorted(viz_dir.glob("*.csv"))}
@@ -145,7 +146,7 @@ html = html.replace(
     "<script>function k4pCsv(name) {"
     " var text = (window.K4P_VIZ_DATA || {})[name];"
     " return text != null ? Promise.resolve(d3.csvParse(text))"
-    f' : d3.csv("{LIVE_FILES}" + name); }}</script>',
+    f' : d3.csv("{LIVE_FILES}" + name).catch(function () {{ return []; }}); }}</script>',
     1,
 )
 if viz_data:
